@@ -1,94 +1,128 @@
+import 'dart:async';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
-class DBHelper {
-  static final DBHelper instance = DBHelper._init();
+class DatabaseHelper {
   static Database? _database;
 
-  DBHelper._init();
-
+  // Membuat instance database
   Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDB('flutter_crud.db');
-    return _database!;
+    if (_database != null) {
+      return _database!;
+    } else {
+      _database = await _initializeDatabase();
+      return _database!;
+    }
   }
 
-  Future<Database> _initDB(String fileName) async {
-    final dbPath = await getDatabasesPath();
-    final path = join(dbPath, fileName);
-
-    return await openDatabase(
+  // Membuat dan menginisialisasi database
+  Future<Database> _initializeDatabase() async {
+    String path = join(await getDatabasesPath(), 'stock_management.db');
+    return openDatabase(
       path,
       version: 1,
-      onCreate: _createDB,
+      onCreate: (db, version) {
+        return db.execute(
+          'CREATE TABLE items(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, stock INTEGER)',
+        );
+      },
     );
   }
 
-  Future _createDB(Database db, int version) async {
-    await db.execute('''
-      CREATE TABLE users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL,
-        password TEXT NOT NULL
-      )
-    ''');
+// Menambahkan barang baru atau menambah stok jika barang sudah ada
+  Future<void> addItem(String name, int stock) async {
+    final db = await database;
+    var result = await db.query(
+      'items',
+      where: 'name = ?',
+      whereArgs: [name],
+    );
+
+    if (result.isNotEmpty) {
+      // Jika barang sudah ada, tambahkan stoknya
+      var existingItem = result.first;
+      int existingStock = existingItem['stock'] as int? ?? 0; // Cast ke int
+      int updatedStock = existingStock + stock;
+      await db.update(
+        'items',
+        {'stock': updatedStock},
+        where: 'id = ?',
+        whereArgs: [existingItem['id']],
+      );
+    } else {
+      // Jika barang baru, tambahkan ke database
+      await db.insert(
+        'items',
+        {'name': name, 'stock': stock},
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
   }
 
-  Future close() async {
-    final db = await instance.database;
-    db.close();
+// Memperbarui barang yang sudah ada
+  Future<void> updateItem(int id, String name, int stock) async {
+    final db = await database;
+    await db.update(
+      'items',
+      {'name': name, 'stock': stock},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
-Future<void> addUser(String username, String password) async {
-  final db = await instance.database;
+// Mengurangi stok barang
+  Future<void> reduceStock(int id, int stock) async {
+    final db = await database;
+    var result = await db.query(
+      'items',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
 
-  await db.insert(
-    'users',
-    {'username': username, 'password': password},
-    conflictAlgorithm: ConflictAlgorithm.replace,
-  );
+    if (result.isNotEmpty) {
+      var existingItem = result.first;
+      int existingStock = existingItem['stock'] as int? ?? 0; // Cast ke int
+      int updatedStock = existingStock - stock;
+
+      // Pastikan stok tidak menjadi negatif
+      if (updatedStock < 0) {
+        updatedStock = 0; // Atau tampilkan pesan kesalahan jika perlu
+      }
+
+      await db.update(
+        'items',
+        {'stock': updatedStock},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    } else {
+      throw Exception('Item with id $id not found.');
+    }
+  }
+
+  // Mengambil semua data barang
+  Future<List<Map<String, dynamic>>> getAllItems() async {
+    final db = await database;
+    return await db.query('items');
+  }
+
+  // Menghapus barang berdasarkan id
+  Future<void> deleteItem(int id) async {
+    final db = await database;
+    var result = await db.query(
+      'items',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+
+    if (result.isNotEmpty) {
+      await db.delete(
+        'items',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    } else {
+      throw Exception('Item with id $id not found.');
+    }
+  }
 }
-
-  Future<List<Map<String, dynamic>>> getUsers() async {
-  final db = await instance.database;
-
-  return await db.query('users');
-}
-
-Future<void> updateUser(int id, String username, String password) async {
-  final db = await instance.database;
-
-  await db.update(
-    'users',
-    {'username': username, 'password': password},  // Update username dan password
-    where: 'id = ?',
-    whereArgs: [id],
-  );
-}
-
-
-Future<void> deleteUser(int id) async {
-  final db = await instance.database;
-
-  await db.delete(
-    'users',
-    where: 'id = ?',
-    whereArgs: [id],
-  );
-}
-
-Future<bool> login(String username, String password) async {
-  final db = await instance.database;
-
-  final result = await db.query(
-    'users',
-    where: 'username = ? AND password = ?',
-    whereArgs: [username, password],
-  );
-
-  return result.isNotEmpty;
-}
-
-}
-
-
